@@ -1,0 +1,46 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# shellcheck source=./_iterm-lib.sh
+source "$(dirname "$0")/_iterm-lib.sh"
+
+iterm_precheck || exit 1
+
+DIR="${1:-$PWD}"
+shift || true
+CMD="${*:-}"
+
+# C1 security: shell-quote DIR pra prevenir injection
+SAFE_DIR="$(iterm_safe_dir "$DIR")" || exit 1
+
+if [[ -z "$CMD" ]]; then
+  CMD="cd $SAFE_DIR"
+else
+  CMD="cd $SAFE_DIR && $CMD"
+fi
+
+if iterm_needs_tmpfile "$CMD"; then
+  TMPFILE="$(iterm_write_tmpfile "$CMD")"
+  iterm_cleanup_trap "$TMPFILE"
+  osascript <<APPLESCRIPT
+tell application "iTerm"
+  activate
+  set cmdContent to (do shell script "cat '$TMPFILE'")
+  set newWindow to (create window with default profile)
+  tell current session of newWindow
+    write text cmdContent
+  end tell
+end tell
+APPLESCRIPT
+else
+  ESCAPED="$(iterm_escape_inline "$CMD")"
+  osascript <<APPLESCRIPT
+tell application "iTerm"
+  activate
+  set newWindow to (create window with default profile)
+  tell current session of newWindow
+    write text "$ESCAPED"
+  end tell
+end tell
+APPLESCRIPT
+fi

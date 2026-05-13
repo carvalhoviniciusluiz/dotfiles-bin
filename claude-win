@@ -1,0 +1,55 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# shellcheck source=./_iterm-lib.sh
+source "$(dirname "$0")/_iterm-lib.sh"
+
+iterm_precheck || exit 1
+
+DIR="${1:?Informe a pasta do projeto}"
+PROMPT_FILE="${2:?Informe um arquivo .md/.txt com o prompt}"
+
+# C1 security: validates dir existence + shell-quote
+SAFE_DIR="$(iterm_safe_dir "$DIR")" || exit 1
+
+if [[ ! -f "$PROMPT_FILE" ]]; then
+  echo "❌ Arquivo de prompt não existe: $PROMPT_FILE" >&2
+  exit 1
+fi
+
+PROMPT_CONTENT="$(cat "$PROMPT_FILE")"
+CMD="cd $SAFE_DIR && claude"
+
+# CMD is sempre curto ASCII (cd + claude) — inline OK
+ESC_CMD="$(iterm_escape_inline "$CMD")"
+
+# PROMPT_CONTENT pode ser longo OR UTF-8 — tmpfile branch
+if iterm_needs_tmpfile "$PROMPT_CONTENT"; then
+  PROMPT_TMPFILE="$(iterm_write_tmpfile "$PROMPT_CONTENT")"
+  iterm_cleanup_trap "$PROMPT_TMPFILE"
+  osascript <<APPLESCRIPT
+tell application "iTerm"
+  activate
+  set promptContent to (do shell script "cat '$PROMPT_TMPFILE'")
+  set newWindow to (create window with default profile)
+  tell current session of newWindow
+    write text "$ESC_CMD"
+    delay 0.35
+    write text promptContent
+  end tell
+end tell
+APPLESCRIPT
+else
+  ESC_PROMPT="$(iterm_escape_inline "$PROMPT_CONTENT")"
+  osascript <<APPLESCRIPT
+tell application "iTerm"
+  activate
+  set newWindow to (create window with default profile)
+  tell current session of newWindow
+    write text "$ESC_CMD"
+    delay 0.35
+    write text "$ESC_PROMPT"
+  end tell
+end tell
+APPLESCRIPT
+fi
