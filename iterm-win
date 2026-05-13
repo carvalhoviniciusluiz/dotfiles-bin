@@ -4,20 +4,35 @@ set -euo pipefail
 # shellcheck source=./_iterm-lib.sh
 source "$(dirname "$0")/_iterm-lib.sh"
 
+# v3 additive (2026-05-13): parse --help/--label/--prompt-file
+POSITIONAL=()
+while IFS= read -r _line; do
+    POSITIONAL+=("$_line")
+done < <(iterm_parse_flags "iterm-win" \
+    "Opens a new WINDOW in iTerm + cd <dir> + runs <cmd>." \
+    "$@")
+
 iterm_precheck || exit 1
 
-DIR="${1:-$PWD}"
-shift || true
-CMD="${*:-}"
+DIR="${POSITIONAL[0]:-$PWD}"
+unset 'POSITIONAL[0]'
+CMD="${POSITIONAL[*]:-}"
 
 # C1 security: shell-quote DIR pra prevenir injection
 SAFE_DIR="$(iterm_safe_dir "$DIR")" || exit 1
 
-if [[ -z "$CMD" ]]; then
+# --prompt-file replaces CMD with file contents (bypasses AppleScript typing cap on long payloads)
+if [[ -n "$ITERM_PROMPT_FILE" ]]; then
+  CMD="cd $SAFE_DIR && $(cat "$ITERM_PROMPT_FILE")"
+elif [[ -z "$CMD" ]]; then
   CMD="cd $SAFE_DIR"
 else
   CMD="cd $SAFE_DIR && $CMD"
 fi
+
+iterm_audit_log "iterm-win" "$DIR" "$CMD"
+
+LABEL_SNIPPET="$(iterm_label_snippet)"
 
 if iterm_needs_tmpfile "$CMD"; then
   TMPFILE="$(iterm_write_tmpfile "$CMD")"
@@ -28,6 +43,7 @@ tell application "iTerm"
   set cmdContent to (do shell script "cat '$TMPFILE'")
   set newWindow to (create window with default profile)
   tell current session of newWindow
+$LABEL_SNIPPET
     write text cmdContent
   end tell
 end tell
@@ -39,6 +55,7 @@ tell application "iTerm"
   activate
   set newWindow to (create window with default profile)
   tell current session of newWindow
+$LABEL_SNIPPET
     write text "$ESCAPED"
   end tell
 end tell

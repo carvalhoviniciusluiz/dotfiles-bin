@@ -1,0 +1,96 @@
+#!/usr/bin/env bash
+# spawn-tl — convenience wrapper to spawn a fresh Claude Code Tech Lead session
+# in a chosen project. Auto-detects the latest handoff file in a configurable
+# directory and uses it for onboarding. Delegates to iterm-tab (short prompt)
+# OR claude-win (when --prompt-file is supplied — safe for long prompts).
+
+set -euo pipefail
+
+# Defaults — override via env vars (export in your shell rc per project).
+PROJECT_DIR="${SPAWN_TL_PROJECT_DIR:-$PWD}"
+AGENT="${SPAWN_TL_AGENT:-tech-lead}"
+MODEL="${SPAWN_TL_MODEL:-opus}"
+HANDOFF_DIR="${SPAWN_TL_HANDOFF_DIR:-plans/handoffs}"
+HANDOFF_GLOB="${SPAWN_TL_HANDOFF_GLOB:-HANDOFF_SESSION_*.md}"
+
+LABEL=""
+EXPLICIT_PROMPT_FILE=""
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --help|-h)
+            cat <<HELP
+Usage: spawn-tl [OPTIONS]
+
+Spawns a fresh Tech Lead session for the project at SPAWN_TL_PROJECT_DIR
+(default: \$PWD). Auto-detects the latest handoff file under
+<project>/\${SPAWN_TL_HANDOFF_DIR} matching \${SPAWN_TL_HANDOFF_GLOB} and uses it
+for onboarding.
+
+Options:
+  --help                   Show this help and exit
+  --label <name>           Custom iTerm session name (forwarded to underlying helper)
+  --prompt-file <path>     Use claude-win with that file (safe for prompts of any size)
+
+Env vars (override defaults):
+  SPAWN_TL_PROJECT_DIR     Project directory (default: \$PWD)
+  SPAWN_TL_AGENT           Claude agent name (default: tech-lead)
+  SPAWN_TL_MODEL           Claude model (default: opus)
+  SPAWN_TL_HANDOFF_DIR     Handoff dir relative to project (default: plans/handoffs)
+  SPAWN_TL_HANDOFF_GLOB    Glob for handoff files (default: HANDOFF_SESSION_*.md)
+  SPAWN_LOG=1              Append spawn record to ~/.claude/spawn-log.txt
+
+Examples:
+  spawn-tl                                       # uses defaults; spawns in \$PWD
+  spawn-tl --label "feature-X"
+  SPAWN_TL_PROJECT_DIR=~/projects/foo spawn-tl
+  spawn-tl --prompt-file /path/to/long-prompt.md
+
+See: ~/bin/README.md
+HELP
+            exit 0
+            ;;
+        --label)
+            LABEL="${2:?--label requires a value}"
+            shift 2
+            ;;
+        --prompt-file)
+            EXPLICIT_PROMPT_FILE="${2:?--prompt-file requires a value}"
+            shift 2
+            ;;
+        *)
+            echo "ERR: unknown flag: $1 (try --help)" >&2
+            exit 1
+            ;;
+    esac
+done
+
+if [[ ! -d "$PROJECT_DIR" ]]; then
+    echo "ERR: project dir does not exist: $PROJECT_DIR" >&2
+    echo "Set SPAWN_TL_PROJECT_DIR env var or run from a project dir." >&2
+    exit 1
+fi
+
+if [[ -n "$EXPLICIT_PROMPT_FILE" ]]; then
+    if [[ ! -f "$EXPLICIT_PROMPT_FILE" ]]; then
+        echo "ERR: prompt file does not exist: $EXPLICIT_PROMPT_FILE" >&2
+        exit 1
+    fi
+    LABEL_ARGS=()
+    [[ -n "$LABEL" ]] && LABEL_ARGS=(--label "$LABEL")
+    exec ~/bin/claude-win "${LABEL_ARGS[@]}" "$PROJECT_DIR" "$EXPLICIT_PROMPT_FILE"
+fi
+
+LATEST_HANDOFF="$(ls -t "$PROJECT_DIR/$HANDOFF_DIR/"$HANDOFF_GLOB 2>/dev/null | head -1 || true)"
+
+if [[ -z "$LATEST_HANDOFF" ]]; then
+    PROMPT="Onboarding fresh. No handoff file found at $HANDOFF_DIR/$HANDOFF_GLOB — read project README and CLAUDE.md if present."
+else
+    HANDOFF_REL="${LATEST_HANDOFF#$PROJECT_DIR/}"
+    PROMPT="Onboarding fresh. Read CLAUDE.md (if present) + $HANDOFF_REL for context."
+fi
+
+LABEL_ARGS=()
+[[ -n "$LABEL" ]] && LABEL_ARGS=(--label "$LABEL")
+
+exec ~/bin/iterm-tab "${LABEL_ARGS[@]}" "$PROJECT_DIR" \
+    "claude --agent $AGENT --model $MODEL '$PROMPT'"

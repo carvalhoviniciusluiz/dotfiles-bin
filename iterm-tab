@@ -4,20 +4,38 @@ set -euo pipefail
 # shellcheck source=./_iterm-lib.sh
 source "$(dirname "$0")/_iterm-lib.sh"
 
+# v3 additive (2026-05-13): parse --help/--label/--prompt-file BEFORE precheck.
+# No flags → identical behavior to v2 (100% backward-compat).
+POSITIONAL=()
+while IFS= read -r _line; do
+    POSITIONAL+=("$_line")
+done < <(iterm_parse_flags "iterm-tab" \
+    "Opens a new TAB in current iTerm window + cd <dir> + runs <cmd>." \
+    "$@")
+
 iterm_precheck || exit 1
 
-DIR="${1:-$PWD}"
-shift || true
-CMD="${*:-}"
+DIR="${POSITIONAL[0]:-$PWD}"
+unset 'POSITIONAL[0]'
+CMD="${POSITIONAL[*]:-}"
 
 # C1 security: shell-quote DIR pra prevenir injection
 SAFE_DIR="$(iterm_safe_dir "$DIR")" || exit 1
 
-if [[ -z "$CMD" ]]; then
+# --prompt-file replaces CMD with file contents (robust escape via tmpfile branch — bypasses AppleScript typing cap on long payloads).
+if [[ -n "$ITERM_PROMPT_FILE" ]]; then
+  CMD="cd $SAFE_DIR && $(cat "$ITERM_PROMPT_FILE")"
+elif [[ -z "$CMD" ]]; then
   CMD="cd $SAFE_DIR"
 else
   CMD="cd $SAFE_DIR && $CMD"
 fi
+
+# Opt-in audit log (SPAWN_LOG=1)
+iterm_audit_log "iterm-tab" "$DIR" "$CMD"
+
+# Label snippet (--label flag) — embedded unconditionally, empty if not set
+LABEL_SNIPPET="$(iterm_label_snippet)"
 
 if iterm_needs_tmpfile "$CMD"; then
   TMPFILE="$(iterm_write_tmpfile "$CMD")"
@@ -29,6 +47,7 @@ tell application "iTerm"
   tell current window
     create tab with default profile
     tell current session of current tab
+$LABEL_SNIPPET
       write text cmdContent
     end tell
   end tell
@@ -42,6 +61,7 @@ tell application "iTerm"
   tell current window
     create tab with default profile
     tell current session of current tab
+$LABEL_SNIPPET
       write text "$ESCAPED_CMD"
     end tell
   end tell

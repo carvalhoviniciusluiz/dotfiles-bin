@@ -67,3 +67,109 @@ iterm_cleanup_trap() {
     # shellcheck disable=SC2064  # we WANT immediate expansion of $tmpfile
     trap "rm -f '$tmpfile'" EXIT HUP INT TERM
 }
+
+# -----------------------------------------------------------------------------
+# v3 additive helpers (2026-05-13). All opt-in via flag/env — without flags,
+# scripts behave identically to v2.
+# -----------------------------------------------------------------------------
+
+# Standardized usage helper (--help flag across iterm-tab/win/claude-win).
+# Caller passes: script_name + usage_summary + extra_flags_block (optional).
+iterm_show_help() {
+    local script="$1"
+    local summary="$2"
+    local extra="${3:-}"
+    cat <<HELP
+Usage: $script [OPTIONS] <dir> [<cmd-or-prompt-file>]
+
+$summary
+
+Options:
+  --help                   Show this help and exit
+  --label <name>           Custom iTerm tab/window name (set name of session)
+  --prompt-file <file>     Read command/prompt from file (robust escape, bypasses AppleScript cap)$extra
+
+Env:
+  SPAWN_LOG=1              Append record to ~/.claude/spawn-log.txt (script + dir + cmd + timestamp)
+
+Examples:
+  $script /path/to/project "echo hello"
+  $script --label "build-watch" --prompt-file /tmp/cmd.sh /path/to/project
+
+See: ~/bin/README.md
+HELP
+}
+
+# Opt-in audit log via SPAWN_LOG=1 env var.
+# Idempotent — without SPAWN_LOG set, full no-op. Appends to ~/.claude/spawn-log.txt.
+iterm_audit_log() {
+    [[ "${SPAWN_LOG:-0}" != "1" ]] && return 0
+    local script="$1"
+    local dir="$2"
+    local cmd_or_prompt="$3"
+    local log="${SPAWN_LOG_PATH:-$HOME/.claude/spawn-log.txt}"
+    mkdir -p "$(dirname "$log")" 2>/dev/null || true
+    {
+        printf '[%s] script=%s dir=%s cmd_len=%d label=%s\n' \
+            "$(date '+%Y-%m-%d %H:%M:%S')" \
+            "$script" \
+            "$dir" \
+            "${#cmd_or_prompt}" \
+            "${ITERM_LABEL:-<none>}"
+    } >> "$log" 2>/dev/null || true
+    return 0
+}
+
+# AppleScript snippet to rename session (--label flag).
+# Echoes empty string if ITERM_LABEL not set — caller embeds unconditionally.
+iterm_label_snippet() {
+    [[ -z "${ITERM_LABEL:-}" ]] && return 0
+    local label="$ITERM_LABEL"
+    # escape quotes for AppleScript safety
+    label="${label//\"/\\\"}"
+    printf '      set name to "%s"' "$label"
+}
+
+# Shared parser for additive flags (--help / --label / --prompt-file).
+# Consumes --help/--label/--prompt-file from "$@", exports ITERM_LABEL + ITERM_PROMPT_FILE.
+# Returns remaining args via stdout (one per line — caller uses mapfile/array).
+# Default behavior preserved: no flags → empty vars → script runs as before.
+iterm_parse_flags() {
+    local script_name="$1"
+    local summary="$2"
+    shift 2
+    local remaining=()
+    ITERM_LABEL=""
+    ITERM_PROMPT_FILE=""
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --help|-h)
+                iterm_show_help "$script_name" "$summary" >&2
+                exit 0
+                ;;
+            --label)
+                ITERM_LABEL="${2:-}"
+                shift 2 || { echo "ERR: --label requires a value" >&2; exit 1; }
+                ;;
+            --prompt-file)
+                ITERM_PROMPT_FILE="${2:-}"
+                if [[ ! -f "$ITERM_PROMPT_FILE" ]]; then
+                    echo "ERR: --prompt-file does not exist: $ITERM_PROMPT_FILE" >&2
+                    exit 1
+                fi
+                shift 2 || { echo "ERR: --prompt-file requires a value" >&2; exit 1; }
+                ;;
+            --)
+                shift
+                remaining+=("$@")
+                break
+                ;;
+            *)
+                remaining+=("$1")
+                shift
+                ;;
+        esac
+    done
+    export ITERM_LABEL ITERM_PROMPT_FILE
+    printf '%s\n' "${remaining[@]}"
+}
