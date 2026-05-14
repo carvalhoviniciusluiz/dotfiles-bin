@@ -131,16 +131,22 @@ iterm_label_snippet() {
 }
 
 # Shared parser for additive flags (--help / --label / --prompt-file).
-# Consumes --help/--label/--prompt-file from "$@", exports ITERM_LABEL + ITERM_PROMPT_FILE.
-# Returns remaining args via stdout (one per line — caller uses mapfile/array).
-# Default behavior preserved: no flags → empty vars → script runs as before.
+# IMPORTANT: must be called directly (NOT via process substitution / subshell) so
+# that ITERM_LABEL, ITERM_PROMPT_FILE, and POSITIONAL global vars are set in the
+# caller's shell. With set -u, callers must initialize the 3 globals BEFORE the call.
+#
+# Caller pattern (required):
+#   ITERM_LABEL=""
+#   ITERM_PROMPT_FILE=""
+#   POSITIONAL=()
+#   iterm_parse_flags "script-name" "summary" "$@"
+#   # POSITIONAL, ITERM_LABEL, ITERM_PROMPT_FILE are now populated
 iterm_parse_flags() {
     local script_name="$1"
     local summary="$2"
     shift 2
-    local remaining=()
-    ITERM_LABEL=""
-    ITERM_PROMPT_FILE=""
+    # POSITIONAL is a global array — reset it here
+    POSITIONAL=()
     while [[ $# -gt 0 ]]; do
         case "$1" in
             --help|-h)
@@ -149,27 +155,29 @@ iterm_parse_flags() {
                 ;;
             --label)
                 ITERM_LABEL="${2:-}"
-                shift 2 || { echo "ERR: --label requires a value" >&2; exit 1; }
+                if [[ -z "$ITERM_LABEL" ]]; then
+                    echo "ERR: --label requires a value" >&2
+                    exit 1
+                fi
+                shift 2
                 ;;
             --prompt-file)
                 ITERM_PROMPT_FILE="${2:-}"
-                if [[ ! -f "$ITERM_PROMPT_FILE" ]]; then
-                    echo "ERR: --prompt-file does not exist: $ITERM_PROMPT_FILE" >&2
+                if [[ -z "$ITERM_PROMPT_FILE" ]] || [[ ! -f "$ITERM_PROMPT_FILE" ]]; then
+                    echo "ERR: --prompt-file requires an existing file: ${2:-<missing>}" >&2
                     exit 1
                 fi
-                shift 2 || { echo "ERR: --prompt-file requires a value" >&2; exit 1; }
+                shift 2
                 ;;
             --)
                 shift
-                remaining+=("$@")
+                POSITIONAL+=("$@")
                 break
                 ;;
             *)
-                remaining+=("$1")
+                POSITIONAL+=("$1")
                 shift
                 ;;
         esac
     done
-    export ITERM_LABEL ITERM_PROMPT_FILE
-    printf '%s\n' "${remaining[@]}"
 }

@@ -5,12 +5,13 @@ set -euo pipefail
 source "$(dirname "$0")/_iterm-lib.sh"
 
 # v3 additive (2026-05-13): parse --help/--label/--prompt-file
+# Globals must be initialized before calling iterm_parse_flags (set -u guard).
+ITERM_LABEL=""
+ITERM_PROMPT_FILE=""
 POSITIONAL=()
-while IFS= read -r _line; do
-    POSITIONAL+=("$_line")
-done < <(iterm_parse_flags "iterm-win" \
+iterm_parse_flags "iterm-win" \
     "Opens a new WINDOW in iTerm + cd <dir> + runs <cmd>." \
-    "$@")
+    "$@"
 
 iterm_precheck || exit 1
 
