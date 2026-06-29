@@ -77,7 +77,7 @@ if [[ -n "$EXPLICIT_PROMPT_FILE" ]]; then
     fi
     LABEL_ARGS=()
     [[ -n "$LABEL" ]] && LABEL_ARGS=(--label "$LABEL")
-    exec ~/bin/claude-win "${LABEL_ARGS[@]}" "$PROJECT_DIR" "$EXPLICIT_PROMPT_FILE"
+    exec ~/bin/claude-win "${LABEL_ARGS[@]+"${LABEL_ARGS[@]}"}" "$PROJECT_DIR" "$EXPLICIT_PROMPT_FILE"
 fi
 
 LATEST_HANDOFF="$(ls -t "$PROJECT_DIR/$HANDOFF_DIR/"$HANDOFF_GLOB 2>/dev/null | head -1 || true)"
@@ -92,5 +92,5 @@ fi
 LABEL_ARGS=()
 [[ -n "$LABEL" ]] && LABEL_ARGS=(--label "$LABEL")
 
-exec ~/bin/iterm-tab "${LABEL_ARGS[@]}" "$PROJECT_DIR" \
+exec ~/bin/iterm-tab "${LABEL_ARGS[@]+"${LABEL_ARGS[@]}"}" "$PROJECT_DIR" \
     "claude --agent $AGENT --model $MODEL '$PROMPT'"
